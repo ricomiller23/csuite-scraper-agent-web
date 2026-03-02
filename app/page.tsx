@@ -225,9 +225,11 @@ export default function Home() {
           data_quality_score: ex.email && ex.email.address && ex.full_name !== "Unknown Executive" ? 85 : 40,
           role_verified_current: true,
           last_updated: new Date().toISOString()
-        }));
+        })).filter((ex: any) => ex.full_name !== "Unknown Executive");
 
-        setResults(prev => [...prev, { company, domain, email_pattern: pattern, executives: execs }]);
+        if (execs.length > 0) {
+          setResults(prev => [...prev, { company, domain, email_pattern: pattern, executives: execs }]);
+        }
       }
     } catch (err: any) {
       setError(err.message || "An unknown error occurred.");
