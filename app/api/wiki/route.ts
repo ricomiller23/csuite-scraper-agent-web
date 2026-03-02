@@ -76,23 +76,29 @@ export async function POST(req: Request) {
 
         // Fallback: Scan body for "Leadership" or "Management" section if no execs found for a title
         if (extractedExecutives.length < titles.length) {
+            const blacklist = ['Chief', 'Executive', 'Officer', 'President', 'Secretary', 'Treasurer', 'Financial', 'Technology', 'Operating', 'Director', 'Board', 'Chairman', 'Name', 'Title', 'Age', 'Since', 'Year', 'Experience', 'Independent', 'Registered', 'Public', 'Counsel', 'General', 'Deputy', 'Assistant', 'Manager', 'Lead', 'Head', 'Associate', 'Senior', 'Junior', 'VP', 'EVP', 'SVP', 'AVP', 'Bank', 'Company', 'Corp', 'Inc', 'LLC', 'Ltd', 'Group', 'Partners', 'Capital', 'Management', 'Services', 'Systems', 'Global', 'National', 'International', 'Federal', 'State', 'City', 'County', 'Annual', 'Meeting', 'Report', 'Filing', 'Statement', 'Form', 'Schedule', 'Proxy', 'Notice', 'Shareholder', 'Stockholder', 'Investor', 'Audit', 'Compensation', 'Governance', 'Nominating', 'Committee', 'Trustee', 'Advisor', 'Consultant', 'Street', 'Avenue', 'Drive', 'Road', 'Lane', 'Way', 'Court', 'Circle', 'Suite', 'Floor', 'Level', 'Building', 'Plaza', 'Square', 'Center', 'Centre', 'Station', 'Park', 'West', 'East', 'North', 'South', 'Chicago', 'Phoenix', 'Arizona', 'Illinois', 'York', 'California', 'Texas', 'Florida', 'City', 'State', 'Zip', 'Phone', 'Email', 'Website', 'WWW', 'HTTP', 'HTTPS', 'COM', 'ORG', 'NET', 'EDU', 'GOV'];
+
             const bodyText = $('body').text();
             for (const targetTitle of titles) {
-                // If this title isn't already found
                 if (!extractedExecutives.find(e => e.title === targetTitle)) {
-                    let titleRegex = new RegExp(`${targetTitle}[^.]{1,60}`, 'i');
-                    if (targetTitle === 'CEO') titleRegex = /Chief Executive Officer[^.]{1,60}/i;
+                    let titleRegex = new RegExp(`${targetTitle}[^.]{1,120}`, 'i');
+                    if (targetTitle === 'CEO') titleRegex = /Chief Executive Officer[^.]{1,120}/i;
 
                     const match = bodyText.match(titleRegex);
                     if (match) {
-                        const nameMatch = match[0].match(/([A-Z][a-z]+ [A-Z][a-z]+)/);
-                        if (nameMatch) {
-                            extractedExecutives.push({
-                                full_name: nameMatch[1],
-                                title: targetTitle,
-                                source: "Wikipedia Body Search",
-                                confidence: 70
-                            });
+                        const potentialNames = match[0].match(/\b(?:Mc|Mac)?[A-Z][a-z]{1,20}(?:\s+(?:Mc|Mac)?[A-Z][a-z]{1,20}){1,2}\b/g) || [];
+                        for (const nameCandidate of potentialNames) {
+                            const words = nameCandidate.split(/\s+/);
+                            const isBlacklisted = words.some(w => blacklist.some(b => w.toLowerCase() === b.toLowerCase()));
+                            if (!isBlacklisted && words.length >= 2 && words.length <= 3) {
+                                extractedExecutives.push({
+                                    full_name: nameCandidate.trim(),
+                                    title: targetTitle,
+                                    source: "Wikipedia Body Search",
+                                    confidence: 70
+                                });
+                                break;
+                            }
                         }
                     }
                 }

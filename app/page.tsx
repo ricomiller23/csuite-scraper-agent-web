@@ -130,33 +130,30 @@ export default function Home() {
         if (title === "CEO") titleQuery = "Chief Executive Officer OR CEO";
 
         const query = encodeURIComponent(`"${companyName}" "${titleQuery}" site:linkedin.com/in/`);
+        const blacklist = ['Chief', 'Executive', 'Officer', 'President', 'Secretary', 'Treasurer', 'Financial', 'Technology', 'Operating', 'Director', 'Board', 'Chairman', 'Name', 'Title', 'Age', 'Since', 'Year', 'Experience', 'Independent', 'Registered', 'Public', 'Counsel', 'General', 'Deputy', 'Assistant', 'Manager', 'Lead', 'Head', 'Associate', 'Senior', 'Junior', 'VP', 'EVP', 'SVP', 'AVP', 'Bank', 'Company', 'Corp', 'Inc', 'LLC', 'Ltd', 'Group', 'Partners', 'Capital', 'Management', 'Services', 'Systems', 'Global', 'National', 'International', 'Federal', 'State', 'City', 'County', 'Annual', 'Meeting', 'Report', 'Filing', 'Statement', 'Form', 'Schedule', 'Proxy', 'Notice', 'Shareholder', 'Stockholder', 'Investor', 'Audit', 'Compensation', 'Governance', 'Nominating', 'Committee', 'Trustee', 'Advisor', 'Consultant', 'Street', 'Avenue', 'Drive', 'Road', 'Lane', 'Way', 'Court', 'Circle', 'Suite', 'Floor', 'Level', 'Building', 'Plaza', 'Square', 'Center', 'Centre', 'Station', 'Park', 'West', 'East', 'North', 'South', 'Chicago', 'Phoenix', 'Arizona', 'Illinois', 'York', 'California', 'Texas', 'Florida', 'City', 'State', 'Zip'];
+
         try {
           const content = await fetchHtmlProxy(query, true);
           const $ = cheerio.load(content);
 
-          let foundInSerp = false;
-
           $('div.g').each((_, el) => {
-            const text = $(el).text().toLowerCase();
-            if (text.includes(title.toLowerCase().split(' ')[0]) || text.includes(companyName.toLowerCase().split(' ')[0])) {
-              const header = $(el).find('a').first();
-              let LI_url = header.attr('href') || "";
-              if (LI_url.startsWith('/url?q=')) LI_url = LI_url.split('/url?q=')[1].split('&')[0];
-              if (!LI_url.includes('linkedin.com/in')) return true;
+            const header = $(el).find('a').first();
+            let LI_url = header.attr('href') || "";
+            if (LI_url.startsWith('/url?q=')) LI_url = LI_url.split('/url?q=')[1].split('&')[0];
+            if (!LI_url.includes('linkedin.com/in')) return true;
 
-              let rawText = $(el).find('h3').text().split('-')[0].split('|')[0].trim();
-              const nameWords = rawText.split(' ');
-              let filteredNameWords = nameWords.filter(w => !w.toLowerCase().includes("linkedin"));
-              const name = filteredNameWords.length >= 2 ? `${filteredNameWords[0]} ${filteredNameWords[1]}` : rawText;
+            let rawText = $(el).find('h3').text().split('-')[0].split('|')[0].trim();
+            const words = rawText.split(/\s+/);
+            const isBlacklisted = words.some(w => blacklist.some(b => w.toLowerCase() === b.toLowerCase()));
 
+            if (!isBlacklisted && words.length >= 2 && words.length <= 4) {
               foundExec = {
-                full_name: name,
+                full_name: rawText,
                 title: title,
                 linkedin_url: LI_url,
                 sources: [`Search Engine fallback`],
                 confidence: 60
               };
-              foundInSerp = true;
               return false; // Break
             }
           });

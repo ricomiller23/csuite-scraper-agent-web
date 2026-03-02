@@ -79,7 +79,9 @@ export async function POST(req: Request) {
                     const bodyText = $('body').text();
 
                     // Search for titles in the text and try to extract names
-                    const blacklist = ['Chief', 'Executive', 'Officer', 'President', 'Secretary', 'Treasurer', 'Financial', 'Technology', 'Operating', 'Director', 'Board', 'Chairman', 'Name', 'Title', 'Age', 'Since', 'Year', 'Experience', 'Independent', 'Registered', 'Public'];
+                    const blacklist = [
+                        'Chief', 'Executive', 'Officer', 'President', 'Secretary', 'Treasurer', 'Financial', 'Technology', 'Operating', 'Director', 'Board', 'Chairman', 'Name', 'Title', 'Age', 'Since', 'Year', 'Experience', 'Independent', 'Registered', 'Public', 'Counsel', 'General', 'Deputy', 'Assistant', 'Manager', 'Lead', 'Head', 'Associate', 'Senior', 'Junior', 'VP', 'EVP', 'SVP', 'AVP', 'Bank', 'Company', 'Corp', 'Inc', 'LLC', 'Ltd', 'Group', 'Partners', 'Capital', 'Management', 'Services', 'Systems', 'Global', 'National', 'International', 'Federal', 'State', 'City', 'County', 'Annual', 'Meeting', 'Report', 'Filing', 'Statement', 'Form', 'Schedule', 'Proxy', 'Notice', 'Shareholder', 'Stockholder', 'Investor', 'Audit', 'Compensation', 'Governance', 'Nominating', 'Committee', 'Trustee', 'Advisor', 'Consultant', 'Street', 'Avenue', 'Drive', 'Road', 'Lane', 'Way', 'Court', 'Circle', 'Suite', 'Floor', 'Level', 'Building', 'Plaza', 'Square', 'Center', 'Centre', 'Station', 'Park', 'West', 'East', 'North', 'South', 'Chicago', 'Phoenix', 'Arizona', 'Illinois', 'York', 'California', 'Texas', 'Florida', 'City', 'State', 'Zip', 'Phone', 'Email', 'Website', 'WWW', 'HTTP', 'HTTPS', 'COM', 'ORG', 'NET', 'EDU', 'GOV'
+                    ];
 
                     for (const title of titles) {
                         let titleRegex = new RegExp(`${title}[^.]{1,120}`, 'i');
@@ -87,11 +89,11 @@ export async function POST(req: Request) {
 
                         const match = bodyText.match(titleRegex);
                         if (match) {
-                            const potentialNames = match[0].match(/[A-Z][a-zA-Z'\-]{2,}(?:\s+[A-Z][a-zA-Z'\-]{2,})+/g) || [];
+                            const potentialNames = match[0].match(/\b(?:Mc|Mac)?[A-Z][a-z]{1,20}(?:\s+(?:Mc|Mac)?[A-Z][a-z]{1,20}){1,2}\b/g) || [];
                             for (const nameCandidate of potentialNames) {
                                 const words = nameCandidate.split(/\s+/);
-                                const isBlacklisted = words.some(w => blacklist.some(b => w.toLowerCase().includes(b.toLowerCase())));
-                                if (!isBlacklisted && words.length >= 2 && words.length <= 4) {
+                                const isBlacklisted = words.some(w => blacklist.some(b => w.toLowerCase() === b.toLowerCase()));
+                                if (!isBlacklisted && words.length >= 2 && words.length <= 3) {
                                     extractedExecutives.push({
                                         full_name: nameCandidate.trim(),
                                         title: title,
