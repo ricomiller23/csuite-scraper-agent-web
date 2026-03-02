@@ -79,21 +79,27 @@ export async function POST(req: Request) {
                     const bodyText = $('body').text();
 
                     // Search for titles in the text and try to extract names
+                    const blacklist = ['Chief', 'Executive', 'Officer', 'President', 'Secretary', 'Treasurer', 'Financial', 'Technology', 'Operating', 'Director', 'Board', 'Chairman', 'Name', 'Title', 'Age', 'Since', 'Year', 'Experience', 'Independent', 'Registered', 'Public'];
+
                     for (const title of titles) {
-                        let titleRegex = new RegExp(`${title}[^.]{1,100}`, 'i');
-                        if (title === 'CEO') titleRegex = /Chief Executive Officer[^.]{1,100}/i;
+                        let titleRegex = new RegExp(`${title}[^.]{1,120}`, 'i');
+                        if (title === 'CEO') titleRegex = /Chief Executive Officer[^.]{1,120}/i;
 
                         const match = bodyText.match(titleRegex);
                         if (match) {
-                            // Extract potential names: look for capitalized words near the title
-                            const nameMatch = match[0].match(/([A-Z][a-z]+ [A-Z][a-z]+)/);
-                            if (nameMatch) {
-                                extractedExecutives.push({
-                                    full_name: nameMatch[1],
-                                    title: title,
-                                    source: "SEC EDGAR DEF 14A",
-                                    confidence: 95
-                                });
+                            const potentialNames = match[0].match(/[A-Z][a-zA-Z'\-]{2,}(?:\s+[A-Z][a-zA-Z'\-]{2,})+/g) || [];
+                            for (const nameCandidate of potentialNames) {
+                                const words = nameCandidate.split(/\s+/);
+                                const isBlacklisted = words.some(w => blacklist.some(b => w.toLowerCase().includes(b.toLowerCase())));
+                                if (!isBlacklisted && words.length >= 2 && words.length <= 4) {
+                                    extractedExecutives.push({
+                                        full_name: nameCandidate.trim(),
+                                        title: title,
+                                        source: "SEC EDGAR DEF 14A",
+                                        confidence: 95
+                                    });
+                                    break;
+                                }
                             }
                         }
                     }

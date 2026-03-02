@@ -219,16 +219,17 @@ export default function Home() {
         let execs = await layer2ExecMapping(company, domain, titleList);
         execs = layer3EmailDiscovery(domain, pattern, execs);
 
-        execs = execs.map((ex: any) => ({
+        // 4. Final Mapping & Strict Filtering
+        const verifiedExecs = execs.map((ex: any) => ({
           ...ex,
           phone: { number: null, type: "HQ", confidence: "Low", source_url: "Unverified" },
           data_quality_score: ex.email && ex.email.address && ex.full_name !== "Unknown Executive" ? 85 : 40,
           role_verified_current: true,
           last_updated: new Date().toISOString()
-        })).filter((ex: any) => ex.full_name !== "Unknown Executive");
+        })).filter((ex: any) => ex.full_name && ex.full_name !== "Unknown Executive" && ex.full_name.split(' ').length >= 2);
 
-        if (execs.length > 0) {
-          setResults(prev => [...prev, { company, domain, email_pattern: pattern, executives: execs }]);
+        if (verifiedExecs.length > 0) {
+          setResults(prev => [...prev, { company, domain, email_pattern: pattern, executives: verifiedExecs }]);
         }
       }
     } catch (err: any) {
