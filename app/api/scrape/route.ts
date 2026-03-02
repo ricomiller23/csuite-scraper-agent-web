@@ -1,21 +1,32 @@
 import { NextResponse } from 'next/server';
 import * as cheerio from 'cheerio';
 
+// Function to fetch using a rotating Google Search syntax which is less prone to block Vercel IPs than DuckDuckGo
+async function safeGoogleSearch(query: string): Promise<string> {
+    try {
+        const url = `https://www.google.com/search?q=${query}&hl=en`;
+        const res = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            },
+            next: { revalidate: 3600 }
+        });
+        if (!res.ok) return '';
+        return await res.text();
+    } catch (e) {
+        console.error(`Failed to fetch Google Search:`, e);
+        return '';
+    }
+}
+
 async function safeGet(url: string): Promise<string> {
     try {
         const res = await fetch(url, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Sec-Ch-Ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Upgrade-Insecure-Requests': '1'
             },
             next: { revalidate: 3600 }
         });
@@ -29,19 +40,23 @@ async function safeGet(url: string): Promise<string> {
 
 async function layer1CompanyIntel(companyName: string) {
     const query = encodeURIComponent(`${companyName} official website`);
-    const content = await safeGet(`https://html.duckduckgo.com/html/?q=${query}`);
+    const content = await safeGoogleSearch(query);
     const $ = cheerio.load(content);
 
     let domain = `${companyName.toLowerCase().replace(/\s/g, '')}.com`;
 
-    $('a.result__url').each((_, el) => {
+    // Parse Google Search Results 
+    $('a').each((_, el) => {
         const href = $(el).attr('href');
-        if (href && href.includes('http')) {
-            try {
-                const urlObj = new URL(href);
-                domain = urlObj.hostname.replace('www.', '');
-                return false; // Break loop
-            } catch (e) { }
+        if (href && href.startsWith('/url?q=')) {
+            const actualUrl = href.split('/url?q=')[1].split('&')[0];
+            if (actualUrl && !actualUrl.includes('google.com') && !actualUrl.includes('wikipedia') && !actualUrl.includes('linkedin')) {
+                try {
+                    const urlObj = new URL(actualUrl);
+                    domain = urlObj.hostname.replace('www.', '');
+                    return false; // Break loop
+                } catch (e) { }
+            }
         }
     });
 
@@ -52,7 +67,7 @@ async function layer1CompanyIntel(companyName: string) {
         const emails = contactContent.match(/[\w\.-]+@[\w\.-]+\.\w+/g);
         if (emails && emails.length > 0) {
             for (const email of emails) {
-                if (email.includes(domain) && !email.startsWith('info')) {
+                if (email.includes(domain) && !email.startsWith('info') && !email.startsWith('contact')) {
                     const namePart = email.split('@')[0];
                     pattern = `pattern_derived(${namePart})@${domain}`;
                     break;
@@ -72,22 +87,34 @@ async function layer2ExecMapping(companyName: string, domain: string, titles: st
     const execs = [];
 
     for (const title of titles) {
-        const query = encodeURIComponent(`"${companyName}" "${title}" site:linkedin.com/in/`);
-        const content = await safeGet(`https://html.duckduckgo.com/html/?q=${query}`);
+        let titleQuery = title;
+        if (title === "CEO") titleQuery = "Chief Executive Officer OR CEO";
+
+        const query = encodeURIComponent(`"${companyName}" "${titleQuery}" site:linkedin.com/in/`);
+        const content = await safeGoogleSearch(query);
         const $ = cheerio.load(content);
 
-        const results = $('.result__snippet');
         let found = false;
 
-        results.each((_, el) => {
+        $('div.g').each((_, el) => {
             const text = $(el).text().toLowerCase();
-            if (text.includes(title.toLowerCase()) || text.includes(companyName.toLowerCase())) {
-                const header = el.tagName === 'a' ? $(el).parent().find('a') : $(el).find('a');
-                let LI_url = header.attr('href') || "https://linkedin.com/in/unknown";
+            if (text.includes(title.toLowerCase().split(' ')[0]) || text.includes(companyName.toLowerCase().split(' ')[0])) {
 
-                let rawText = $(el).text().split('-')[0].split('|')[0].trim();
+                const header = $(el).find('a').first();
+                let LI_url = header.attr('href') || "";
+
+                if (LI_url.startsWith('/url?q=')) {
+                    LI_url = LI_url.split('/url?q=')[1].split('&')[0];
+                }
+
+                if (!LI_url.includes('linkedin.com/in')) return true; // continue
+
+                let rawText = $(el).find('h3').text().split('-')[0].split('|')[0].trim();
                 const nameWords = rawText.split(' ');
-                const name = nameWords.length >= 2 ? `${nameWords[0]} ${nameWords[1]}` : rawText;
+
+                // Eliminate "LinkedIn" from name if it got caught
+                let filteredNameWords = nameWords.filter(w => !w.toLowerCase().includes("linkedin"));
+                const name = filteredNameWords.length >= 2 ? `${filteredNameWords[0]} ${filteredNameWords[1]}` : rawText;
 
                 execs.push({
                     full_name: name,
@@ -124,7 +151,7 @@ function layer3EmailDiscovery(domain: string, pattern: string, executives: any[]
         return {
             ...ex,
             email: {
-                address: constructed,
+                address: constructed.replace("..", "."),
                 confidence: "Constructed",
                 source_url: "Pattern Engine",
                 verified_count: 0
@@ -148,7 +175,7 @@ function layer4PhoneDiscovery(companyName: string, executives: any[]) {
 function layer5CrossValidation(executives: any[], domain: string) {
     return executives.map(ex => ({
         ...ex,
-        data_quality_score: ex.email.address ? 75 : 40,
+        data_quality_score: ex.email.address && ex.full_name !== "Unknown Executive" ? 85 : 40,
         role_verified_current: true,
         last_updated: new Date().toISOString()
     }));
