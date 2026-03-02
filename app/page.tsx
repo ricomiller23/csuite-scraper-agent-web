@@ -161,10 +161,10 @@ export default function Home() {
         let execs = await layer2ExecMapping(company, domain, titleList);
         execs = layer3EmailDiscovery(domain, pattern, execs);
 
-        execs = execs.map(ex => ({
+        execs = execs.map((ex: any) => ({
           ...ex,
           phone: { number: null, type: "HQ", confidence: "Low", source_url: "Unverified" },
-          data_quality_score: ex.email.address && ex.full_name !== "Unknown Executive" ? 85 : 40,
+          data_quality_score: ex.email && ex.email.address && ex.full_name !== "Unknown Executive" ? 85 : 40,
           role_verified_current: true,
           last_updated: new Date().toISOString()
         }));
