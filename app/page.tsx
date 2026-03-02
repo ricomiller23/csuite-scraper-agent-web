@@ -66,60 +66,98 @@ export default function Home() {
     return { domain, pattern };
   };
 
+  const fetchJsonApi = async (endpoint: string, bodyObj: any) => {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bodyObj),
+      });
+      const json = await res.json();
+      return json.data || [];
+    } catch { return []; }
+  };
+
   const layer2ExecMapping = async (companyName: string, domain: string, titles: string[]) => {
-    const execs = [];
+    const finalExecs: any[] = [];
+
+    // 1. Fire all intelligence engines in parallel
+    const [wikiData, newsData] = await Promise.all([
+      fetchJsonApi('/api/wiki', { company: companyName, titles }),
+      fetchJsonApi('/api/news', { company: companyName, titles })
+    ]);
 
     for (const title of titles) {
-      let titleQuery = title;
-      if (title === "CEO") titleQuery = "Chief Executive Officer OR CEO";
+      let foundExec: any = null;
 
-      const query = encodeURIComponent(`"${companyName}" "${titleQuery}" site:linkedin.com/in/`);
-      const content = await fetchHtmlProxy(query, true);
-      const $ = cheerio.load(content);
+      // 2. Check Wiki InfoBox (High Confidence Structured Data)
+      const wikiMatch = wikiData.find((w: any) => w.title.toLowerCase() === title.toLowerCase());
+      if (wikiMatch) {
+        foundExec = { ...wikiMatch, sources: ["Wikipedia Infobox"], linkedin_url: `https://linkedin.com/search/results/people/?keywords=${encodeURIComponent(wikiMatch.full_name + " " + companyName)}` };
+      }
 
-      let found = false;
-
-      $('div.g').each((_, el) => {
-        const text = $(el).text().toLowerCase();
-        if (text.includes(title.toLowerCase().split(' ')[0]) || text.includes(companyName.toLowerCase().split(' ')[0])) {
-
-          const header = $(el).find('a').first();
-          let LI_url = header.attr('href') || "";
-
-          if (LI_url.startsWith('/url?q=')) {
-            LI_url = LI_url.split('/url?q=')[1].split('&')[0];
-          }
-
-          if (!LI_url.includes('linkedin.com/in')) return true;
-
-          let rawText = $(el).find('h3').text().split('-')[0].split('|')[0].trim();
-          const nameWords = rawText.split(' ');
-
-          let filteredNameWords = nameWords.filter(w => !w.toLowerCase().includes("linkedin"));
-          const name = filteredNameWords.length >= 2 ? `${filteredNameWords[0]} ${filteredNameWords[1]}` : rawText;
-
-          execs.push({
-            full_name: name,
-            title: title,
-            linkedin_url: LI_url,
-            sources: [`Search query: ${decodeURIComponent(query)}`]
-          });
-          found = true;
-          return false;
+      // 3. Check News RSS Context (Mid-High Confidence)
+      if (!foundExec) {
+        const newsMatch = newsData.find((n: any) => n.title.toLowerCase() === title.toLowerCase());
+        if (newsMatch) {
+          foundExec = { ...newsMatch, sources: ["News Context Match"], linkedin_url: `https://linkedin.com/search/results/people/?keywords=${encodeURIComponent(newsMatch.full_name + " " + companyName)}` };
         }
-      });
+      }
 
-      if (!found) {
-        execs.push({
+      // 4. Fallback to Deep SERP Scrape (DuckDuckGo / Google)
+      if (!foundExec) {
+        let titleQuery = title;
+        if (title === "CEO") titleQuery = "Chief Executive Officer OR CEO";
+
+        const query = encodeURIComponent(`"${companyName}" "${titleQuery}" site:linkedin.com/in/`);
+        try {
+          const content = await fetchHtmlProxy(query, true);
+          const $ = cheerio.load(content);
+
+          let foundInSerp = false;
+
+          $('div.g').each((_, el) => {
+            const text = $(el).text().toLowerCase();
+            if (text.includes(title.toLowerCase().split(' ')[0]) || text.includes(companyName.toLowerCase().split(' ')[0])) {
+              const header = $(el).find('a').first();
+              let LI_url = header.attr('href') || "";
+              if (LI_url.startsWith('/url?q=')) LI_url = LI_url.split('/url?q=')[1].split('&')[0];
+              if (!LI_url.includes('linkedin.com/in')) return true;
+
+              let rawText = $(el).find('h3').text().split('-')[0].split('|')[0].trim();
+              const nameWords = rawText.split(' ');
+              let filteredNameWords = nameWords.filter(w => !w.toLowerCase().includes("linkedin"));
+              const name = filteredNameWords.length >= 2 ? `${filteredNameWords[0]} ${filteredNameWords[1]}` : rawText;
+
+              foundExec = {
+                full_name: name,
+                title: title,
+                linkedin_url: LI_url,
+                sources: [`Search Engine fallback`],
+                confidence: 60
+              };
+              foundInSerp = true;
+              return false; // Break
+            }
+          });
+        } catch (e) { }
+      }
+
+      // 5. Final fallback - Unknown
+      if (!foundExec) {
+        foundExec = {
           full_name: "Unknown Executive",
           title: title,
           linkedin_url: "https://linkedin.com/in/unknown",
-          sources: ["Search fallback (blocked or not found)"]
-        });
+          sources: ["All Intelligence Pipelines Exhausted"],
+          confidence: 0
+        };
       }
+
+      finalExecs.push(foundExec);
     }
 
-    return execs;
+    return finalExecs;
   };
 
   const layer3EmailDiscovery = (domain: string, pattern: string, executives: any[]) => {
@@ -253,37 +291,47 @@ export default function Home() {
                 </div>
                 <div className="divide-y divide-gray-800">
                   {companyData.executives.map((exec: any, j: number) => (
-                    <div key={j} className="p-6 hover:bg-[#151515] transition-colors flex flex-col md:flex-row justify-between items-start md:items-center space-y-4 md:space-y-0 text-sm">
-                      <div className="space-y-1">
-                        <div className="font-bold text-lg text-white">{exec.full_name}</div>
-                        <div className="text-emerald-400 font-medium">{exec.title}</div>
-                        <div className="text-gray-500">
-                          <a href={exec.linkedin_url} target="_blank" rel="noreferrer" className="hover:text-blue-400 underline">LinkedIn</a>
+                    <React.Fragment key={j}>
+                      <div className="p-6 hover:bg-[#151515] transition-colors flex flex-col md:flex-row justify-between items-start md:items-center space-y-4 md:space-y-0 text-sm">
+                        <div className="space-y-1">
+                          <div className="font-bold text-lg text-white">{exec.full_name}</div>
+                          <div className="text-emerald-400 font-medium">{exec.title}</div>
+                          <div className="text-gray-500">
+                            <a href={exec.linkedin_url} target="_blank" rel="noreferrer" className="hover:text-blue-400 underline">LinkedIn</a>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1 w-full md:w-1/3">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Email:</span>
+                            <span className="text-white font-mono">{exec.email.address}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">HQ Phone:</span>
+                            <span className="text-white font-mono">{exec.phone.number || "Unlisted"}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <span className="px-3 py-1 bg-gray-800 text-gray-300 rounded-full font-semibold text-xs border border-gray-700">
+                            Score: {exec.data_quality_score}/100
+                          </span>
+                          {exec.data_quality_score > 50 ? (
+                            <span className="h-3 w-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></span>
+                          ) : (
+                            <span className="h-3 w-3 rounded-full bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]"></span>
+                          )}
                         </div>
                       </div>
 
-                      <div className="space-y-1 w-full md:w-1/3">
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Email:</span>
-                          <span className="text-white font-mono">{exec.email.address}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">HQ Phone:</span>
-                          <span className="text-white font-mono">{exec.phone.number || "Unlisted"}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center space-x-2">
-                        <span className="px-3 py-1 bg-gray-800 text-gray-300 rounded-full font-semibold text-xs border border-gray-700">
-                          Score: {exec.data_quality_score}/100
+                      {/* Source Attribution Display */}
+                      <div className="px-6 pb-4 bg-[#111] border-b border-gray-800">
+                        <span className="text-xs font-mono text-gray-500 uppercase tracking-wider mr-2">Intelligence Source:</span>
+                        <span className="text-xs text-blue-400">
+                          {Array.isArray(exec.sources) ? exec.sources.join(', ') : exec.sources || 'Unknown'}
                         </span>
-                        {exec.data_quality_score > 50 ? (
-                          <span className="h-3 w-3 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></span>
-                        ) : (
-                          <span className="h-3 w-3 rounded-full bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]"></span>
-                        )}
                       </div>
-                    </div>
+                    </React.Fragment>
                   ))}
                 </div>
               </div>
