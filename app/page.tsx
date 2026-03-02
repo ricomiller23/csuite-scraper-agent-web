@@ -82,29 +82,49 @@ export default function Home() {
     const finalExecs: any[] = [];
 
     // 1. Fire all intelligence engines in parallel
-    const [wikiData, newsData] = await Promise.all([
+    const [wikiData, newsData, secData] = await Promise.all([
       fetchJsonApi('/api/wiki', { company: companyName, titles }),
-      fetchJsonApi('/api/news', { company: companyName, titles })
+      fetchJsonApi('/api/news', { company: companyName, titles }),
+      fetchJsonApi('/api/sec', { company: companyName, titles })
     ]);
+
+    const normalizeTitle = (t: string) => {
+      const lower = t.toLowerCase();
+      if (lower.includes('ceo') || lower.includes('chief executive')) return 'ceo';
+      if (lower.includes('cfo') || lower.includes('chief financial')) return 'cfo';
+      if (lower.includes('cto') || lower.includes('technology')) return 'cto';
+      if (lower.includes('cmo') || lower.includes('marketing')) return 'cmo';
+      if (lower.includes('coo') || lower.includes('operating')) return 'coo';
+      return lower;
+    };
 
     for (const title of titles) {
       let foundExec: any = null;
+      const targetNorm = normalizeTitle(title);
 
-      // 2. Check Wiki InfoBox (High Confidence Structured Data)
-      const wikiMatch = wikiData.find((w: any) => w.title.toLowerCase() === title.toLowerCase());
-      if (wikiMatch) {
-        foundExec = { ...wikiMatch, sources: ["Wikipedia Infobox"], linkedin_url: `https://linkedin.com/search/results/people/?keywords=${encodeURIComponent(wikiMatch.full_name + " " + companyName)}` };
+      // 2. Check SEC EDGAR (Highest Confidence for Public Companies)
+      const secMatch = secData.find((s: any) => normalizeTitle(s.title) === targetNorm);
+      if (secMatch) {
+        foundExec = { ...secMatch, sources: ["SEC EDGAR Filing"], linkedin_url: `https://linkedin.com/search/results/people/?keywords=${encodeURIComponent(secMatch.full_name + " " + companyName)}` };
       }
 
-      // 3. Check News RSS Context (Mid-High Confidence)
+      // 3. Check Wiki InfoBox (High Confidence Structured Data)
       if (!foundExec) {
-        const newsMatch = newsData.find((n: any) => n.title.toLowerCase() === title.toLowerCase());
+        const wikiMatch = wikiData.find((w: any) => normalizeTitle(w.title) === targetNorm);
+        if (wikiMatch) {
+          foundExec = { ...wikiMatch, sources: ["Wikipedia Infobox"], linkedin_url: `https://linkedin.com/search/results/people/?keywords=${encodeURIComponent(wikiMatch.full_name + " " + companyName)}` };
+        }
+      }
+
+      // 4. Check News RSS Context (Mid-High Confidence)
+      if (!foundExec) {
+        const newsMatch = newsData.find((n: any) => normalizeTitle(n.title) === targetNorm);
         if (newsMatch) {
           foundExec = { ...newsMatch, sources: ["News Context Match"], linkedin_url: `https://linkedin.com/search/results/people/?keywords=${encodeURIComponent(newsMatch.full_name + " " + companyName)}` };
         }
       }
 
-      // 4. Fallback to Deep SERP Scrape (DuckDuckGo / Google)
+      // 5. Fallback to Deep SERP Scrape (DuckDuckGo / Google)
       if (!foundExec) {
         let titleQuery = title;
         if (title === "CEO") titleQuery = "Chief Executive Officer OR CEO";

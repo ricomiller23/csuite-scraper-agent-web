@@ -41,27 +41,19 @@ export async function POST(req: Request) {
             infobox.find('tr').each((i, row) => {
                 const headerText = $(row).find('th').text().toLowerCase();
 
-                // Wiki Infobox "Key people" section
                 if (headerText.includes('key people')) {
                     const dataHtml = $(row).find('td').html() || '';
-
-                    // Split the HTML using <br> since Wiki separates Key People like "Tim Cook (CEO)<br>Luca Maestri (CFO)"
                     const peopleParts = dataHtml.split(/<br\s*\/?>/i);
 
                     peopleParts.forEach(part => {
-                        const personText = cheerio.load(part).text().trim().replace(/\[\d+\]/g, ''); // Strip citation tags [1]
-
-                        // Parse format: "Person Name, Title" or "Person Name (Title)"
+                        const personText = cheerio.load(part).text().trim().replace(/\[\d+\]/g, '');
                         for (const targetTitle of titles) {
-                            // Check if target title exists in this string line
                             const normalizedPart = personText.toLowerCase();
                             const normalizedTarget = targetTitle.toLowerCase();
 
-                            // e.g. "Tim Cook, CEO"
                             if (normalizedPart.includes(normalizedTarget) ||
                                 (normalizedTarget === 'ceo' && normalizedPart.includes('chief executive officer'))) {
 
-                                // Best effort extraction: Split by comma or parenthesis
                                 let name = personText;
                                 if (personText.includes(',')) {
                                     name = personText.split(',')[0].trim();
@@ -80,6 +72,31 @@ export async function POST(req: Request) {
                     });
                 }
             });
+        }
+
+        // Fallback: Scan body for "Leadership" or "Management" section if no execs found for a title
+        if (extractedExecutives.length < titles.length) {
+            const bodyText = $('body').text();
+            for (const targetTitle of titles) {
+                // If this title isn't already found
+                if (!extractedExecutives.find(e => e.title === targetTitle)) {
+                    let titleRegex = new RegExp(`${targetTitle}[^.]{1,60}`, 'i');
+                    if (targetTitle === 'CEO') titleRegex = /Chief Executive Officer[^.]{1,60}/i;
+
+                    const match = bodyText.match(titleRegex);
+                    if (match) {
+                        const nameMatch = match[0].match(/([A-Z][a-z]+ [A-Z][a-z]+)/);
+                        if (nameMatch) {
+                            extractedExecutives.push({
+                                full_name: nameMatch[1],
+                                title: targetTitle,
+                                source: "Wikipedia Body Search",
+                                confidence: 70
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         return NextResponse.json({ status: "success", data: extractedExecutives });

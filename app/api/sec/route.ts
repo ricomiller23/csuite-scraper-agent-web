@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import * as cheerio from 'cheerio';
 
 async function fetchSECTicker(companyName: string) {
     try {
@@ -44,15 +45,62 @@ export async function POST(req: Request) {
         // Pad CIK to 10 digits
         const paddedCik = companyId.cik_str.toString().padStart(10, '0');
 
-        // Note: For a true full implementation, you would then hit data.sec.gov for the submissions JSON 
-        // `https://data.sec.gov/submissions/CIK${paddedCik}.json`
-        // Extract recent filing URLs, and use Cheerio to parse the HTML of the DEF 14A proxy.
-        // As a proxy statement parser requires complex NLP/Regex bounding boxes across unstructured tables, 
-        // we stub this SEC Intelligence payload here to indicate the API framework is live.
+        // 2. Fetch submissions JSON
+        const submissionsRes = await fetch(`https://data.sec.gov/submissions/CIK${paddedCik}.json`, {
+            headers: { 'User-Agent': 'CSuiteIntelligenceScraper/1.0 (Contact: researcher@example.com)' }
+        });
 
-        const simulatedSECDiscovery: any[] = [];
+        if (!submissionsRes.ok) {
+            return NextResponse.json({ status: "error", message: "SEC Submissions API failed" });
+        }
 
-        // Return structured SEC data stub representing confidence
+        const subData = await submissionsRes.json();
+        const filings = subData.filings?.recent;
+
+        const extractedExecutives: any[] = [];
+
+        if (filings) {
+            // Find index of lateast DEF 14A (Proxy Statement)
+            const proxyIndex = filings.form.findIndex((f: string) => f === 'DEF 14A');
+
+            if (proxyIndex !== -1) {
+                const accessionNumber = filings.accessionNumber[proxyIndex].replace(/-/g, '');
+                const primaryDocument = filings.primaryDocument[proxyIndex];
+                const filingUrl = `https://www.sec.gov/Archives/edgar/data/${companyId.cik_str}/${accessionNumber}/${primaryDocument}`;
+
+                // Fetch the filing HTML
+                const filingRes = await fetch(filingUrl, {
+                    headers: { 'User-Agent': 'CSuiteIntelligenceScraper/1.0 (Contact: researcher@example.com)' }
+                });
+
+                if (filingRes.ok) {
+                    const filingHtml = await filingRes.text();
+                    const $ = cheerio.load(filingHtml);
+                    const bodyText = $('body').text();
+
+                    // Search for titles in the text and try to extract names
+                    for (const title of titles) {
+                        let titleRegex = new RegExp(`${title}[^.]{1,100}`, 'i');
+                        if (title === 'CEO') titleRegex = /Chief Executive Officer[^.]{1,100}/i;
+
+                        const match = bodyText.match(titleRegex);
+                        if (match) {
+                            // Extract potential names: look for capitalized words near the title
+                            const nameMatch = match[0].match(/([A-Z][a-z]+ [A-Z][a-z]+)/);
+                            if (nameMatch) {
+                                extractedExecutives.push({
+                                    full_name: nameMatch[1],
+                                    title: title,
+                                    source: "SEC EDGAR DEF 14A",
+                                    confidence: 95
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         return NextResponse.json({
             status: "success",
             metadata: {
@@ -60,7 +108,7 @@ export async function POST(req: Request) {
                 ticker: companyId.ticker,
                 sec_entity: companyId.title
             },
-            data: simulatedSECDiscovery
+            data: extractedExecutives
         });
 
     } catch (error: any) {
