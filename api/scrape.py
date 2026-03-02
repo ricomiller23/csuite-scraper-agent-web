@@ -116,31 +116,36 @@ def layer5_cross_validation(executives, domain):
         ex['last_updated'] = datetime.now().isoformat()
     return executives
 
-class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        body = json.loads(post_data.decode('utf-8'))
-        
-        companies = body.get('companies', [])
-        titles = body.get('titles', [])
-        
-        results = []
-        for company in companies:
-            domain, pattern = layer1_company_intel(company)
-            execs = layer2_exec_mapping(company, domain, titles)
-            execs = layer3_email_discovery(domain, pattern, execs)
-            execs = layer4_phone_discovery(company, execs)
-            execs = layer5_cross_validation(execs, domain)
-            
-            results.append({
-                "company": company,
-                "domain": domain,
-                "email_pattern": pattern,
-                "executives": execs
-            })
+from flask import Flask, request, jsonify
 
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps({"status": "success", "data": results}).encode('utf-8'))
+app = Flask(__name__)
+
+@app.route('/api/scrape', methods=['POST'])
+def scrape():
+    body = request.get_json()
+    if not body:
+        return jsonify({"error": "No JSON payload provided"}), 400
+        
+    companies = body.get('companies', [])
+    titles = body.get('titles', [])
+    
+    results = []
+    for company in companies:
+        domain, pattern = layer1_company_intel(company)
+        execs = layer2_exec_mapping(company, domain, titles)
+        execs = layer3_email_discovery(domain, pattern, execs)
+        execs = layer4_phone_discovery(company, execs)
+        execs = layer5_cross_validation(execs, domain)
+        
+        results.append({
+            "company": company,
+            "domain": domain,
+            "email_pattern": pattern,
+            "executives": execs
+        })
+
+    return jsonify({"status": "success", "data": results})
+
+# Vercel requires the app to be exported, but executing the file shouldn't start a server
+if __name__ == "__main__":
+    app.run(debug=True)
